@@ -104,7 +104,7 @@ trait ParkTime {
 impl ParkTime for Clock {
     fn get_parktime(&self) -> ParkingTime {
         
-        let h_park = (self.hours.hour().0 + if self.minutes > 29 {1} else {0}) % 12;
+        let h_park = self.hours.hour().0 + if self.minutes > 29 {1} else {0};
         let m_park = if self.minutes > 29 {0} else {30};
         
         ParkingTime{ hour: h_park, minute: m_park}
@@ -220,6 +220,15 @@ mod app {
         let mut ds1302 = DS1302::new(reversed_ds_spi, ds_cs, ds1302_mode::Hour24, ds_timer).unwrap();
         ds1302.set_clock_mode(ds1302_mode::Hour24).unwrap();
         
+        // Read last parkingtime from ds1302 batterybackuped ram
+        let ph = ds1302.read_ram(0);
+        let pm = ds1302.read_ram(1);
+        let last_park = match (ph, pm) {
+            (Ok(h), Ok(m)) => ParkingTime{ hour:h, minute: m },
+            (_, _) =>  ParkingTime{ hour:0, minute: 0 },
+        };
+
+
         let mut epd_spi = spi_bus_manager.acquire();
         let mut epd_timer = Timer::new(p.TIMER0);
         let epd = Epd2in7bc::new( &mut epd_spi, eink_cs, eink_busy, eink_dc, eink_rst, & mut epd_timer).unwrap();
@@ -268,7 +277,7 @@ mod app {
                 btn1,
                 btn2,
                 oled,
-                last_park: ParkingTime { hour: 0, minute: 0 },
+                last_park,
             },
             init::Monotonics(mono)
         )
@@ -424,6 +433,10 @@ mod app {
                 spidevs.epd.epd.update_and_display_frame(&mut spidevs.epd.epd_spi, spidevs.epd.eink.bw_buffer(), &mut spidevs.epd.epd_timer).unwrap();
                 spidevs.epd.epd.sleep(&mut spidevs.epd.epd_spi, &mut spidevs.epd.epd_timer).unwrap();
                 spidevs.epd.eink.clear(TriColor::White).ok();
+
+                // Save last parking time in batterybackupped ram in ds1302
+                let _ = spidevs.ds.write_ram(0, c_park.hour);
+                let _ = spidevs.ds.write_ram(1, c_park.minute);
 
                 *ctx.local.last_park = c_park;
             } 
